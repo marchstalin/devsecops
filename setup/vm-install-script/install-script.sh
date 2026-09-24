@@ -1,5 +1,35 @@
 #!/bin/bash
 
+echo "===============Disable SWAP memory==================="
+
+# Ensure the script is run with sudo/root privileges
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run this script as root or with sudo."
+  exit 1
+fi
+
+# 1. Turn off active runtime swap if configured
+if swapon --show | grep -q '^/'; then
+    echo "Active swap detected. Disabling immediately..."
+    swapoff -a
+    echo "Swap turned off for the current session."
+else
+    echo "No active runtime swap detected."
+fi
+
+# 2. Check and comment out swap entries in /etc/fstab
+if grep -qE '^[^\#].*swap' /etc/fstab; then
+    echo "Active swap configuration found in /etc/fstab. Commenting it out..."
+    
+    # Safely comment out any line containing 'swap' that doesn't already start with '#'
+    sed -i.bak '/swap/ s/^\([^#]\)/#\1/' /etc/fstab
+    
+    echo "Swap disabled permanently in /etc/fstab (backup saved as /etc/fstab.bak)."
+else
+    echo "No active swap configuration found in /etc/fstab."
+fi
+echo "SWAP disable block is completed"
+
 echo ".........----------------#################._.-.-INSTALL-.-._.#################----------------........."
 PS1='\[\e[01;36m\]\u\[\e[01;37m\]@\[\e[01;33m\]\H\[\e[01;37m\]:\[\e[01;32m\]\w\[\e[01;37m\]\$\[\033[0;37m\] '
 echo "PS1='\[\e[01;36m\]\u\[\e[01;37m\]@\[\e[01;33m\]\H\[\e[01;37m\]:\[\e[01;32m\]\w\[\e[01;37m\]\$\[\033[0;37m\] '" >> ~/.bashrc
