@@ -44,8 +44,14 @@ kubeadm init --pod-network-cidr '10.244.0.0/16' --service-cidr '10.96.0.0/16'  -
 mkdir -p ~/.kube
 cp -i /etc/kubernetes/admin.conf ~/.kube/config
 
-kubectl apply -f "https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s-1.11.yaml"
-kubectl rollout status daemonset weave-net -n kube-system --timeout=90s
+#CNI is Calico not weave-net as it's shutdown in 2024
+#kubectl rollout status daemonset weave-net -n kube-system --timeout=90s
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+kubectl -n kube-system rollout status ds/kube-calico-ds --timeout=180s || { echo "CNI failed to come up"; exit 1; }
+
+#Use Flannel for CNI if Calico doesn't workout
+#kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+#kubectl -n kube-system rollout status ds/kube-flannel-ds --timeout=180s || { echo "CNI failed to come up"; exit 1; }
 sleep 5
 
 echo "untaint controlplane node"
@@ -55,6 +61,13 @@ do
     kubectl taint node $node $taint
 done
 kubectl get nodes -o wide
+#------
+#Quick sanity check on containerd config
+#Before re-running, verify the sed actually took effect:
+#bash
+#grep SystemdCgroup /etc/containerd/config.toml
+#You want to see SystemdCgroup = true. If it's not there or still false, fix it manually and restart containerd before doing kubeadm reset again.
+#----
 
 echo ".........----------------#################._.-.-Docker-.-._.#################----------------........."
 
@@ -72,8 +85,24 @@ systemctl restart docker
 systemctl enable docker
 
 
-echo ".........----------------#################._.-.-Java and MAVEN-.-._.#################----------------........."
-apt install openjdk-11-jdk maven -y
+echo ".........----------------#################._.-.-Java (automatic latest version installation) and MAVEN-.-._.#################----------------........."
+#!/bin/bash
+set -e
+
+# Query Adoptium's API for the latest GA feature release
+LATEST_MAJOR=$(curl -s https://api.adoptium.net/v3/info/available_releases | grep -oP '"most_recent_feature_release":\s*\K\d+')
+
+echo "Latest available JDK major version: $LATEST_MAJOR"
+
+# Download and install that version fresh each time
+curl -L "https://api.adoptium.net/v3/binary/latest/${LATEST_MAJOR}/ga/linux/x64/jdk/hotspot/normal/eclipse" \
+  -o /tmp/jdk-latest.tar.gz
+
+mkdir -p /opt/java
+tar -xzf /tmp/jdk-latest.tar.gz -C /opt/java --strip-components=1
+
+update-alternatives --install /usr/bin/java java /opt/java/bin/java 100
+update-alternatives --set java /opt/java/bin/java
 java -version
 mvn -v
 
